@@ -39,6 +39,8 @@ raw_mode(int fd, char **errmsg)
 		*errmsg = "could not get attributes from serial device";
 		return (-1);
 	}
+
+	return (0);
 }
 
 static int
@@ -66,8 +68,6 @@ get_product_string(void)
 	char *output = NULL;
 	int e;
 	smbios_hdl_t *shp;
-	smbios_struct_t s;
-	smbios_info_t info;
 
 	if ((shp = smbios_open(NULL, SMB_VERSION, 0, &e)) == NULL) {
 		return (NULL);

@@ -140,7 +140,7 @@ read_response(mdata_get_t *mdg)
 
 	for (;;) {
 		char buf[2];
-		size_t sz = read(mdg->mdg_fd, &buf, 1);
+		ssize_t sz = read(mdg->mdg_fd, &buf, 1);
 
 		if (sz == 1) {
 			if (buf[0] == '\n') {
@@ -187,9 +187,6 @@ int
 main(int argc, char **argv)
 {
 	char *errmsg;
-	int fd;
-	char buf[500];
-	int pos = 0;
 	mdata_get_t mdg;
 
 
@@ -208,7 +205,6 @@ main(int argc, char **argv)
 	read_response(&mdg);
 	print_response(&mdg);
 
-out:
 	(void) close(mdg.mdg_fd);
 	free(mdg.mdg_keyname);
 

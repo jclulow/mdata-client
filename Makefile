@@ -5,6 +5,7 @@ UNAME_S := $(shell uname -s)
 PLATFORM_OK = false
 
 CFILES = main.c
+CFLAGS = -Wall -Wextra
 LDLIBS =
 
 ifeq ($(UNAME_S),SunOS)
@@ -22,7 +23,7 @@ endif
 all:	mdata-get
 
 mdata-get:	$(CFILES)
-	$(CC) $(LDLIBS) -o $@ $^
+	$(CC) $(CFLAGS) $(LDLIBS) -o $@ $^
 
 .PHONY:	clean
 clean:
