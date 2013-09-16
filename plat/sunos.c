@@ -15,9 +15,10 @@
 #include <sys/socket.h>
 #include <sys/un.h>
 
-#define	IN_ZONE_SOCKET	"/.zonecontrol/metadata.sock"
+#define	IN_ZONE_SOCKET		"/.zonecontrol/metadata.sock"
+#define	IN_GLOBAL_DEVICE	"/dev/term/b"
 
-int
+static int
 raw_mode(int fd, char **errmsg)
 {
 	struct termios tios;
@@ -62,7 +63,7 @@ find_product(smbios_hdl_t *shp, const smbios_struct_t *sp, void *arg)
 	return (0);
 }
 
-char *
+static char *
 get_product_string(void)
 {
 	char *output = NULL;
@@ -80,45 +81,62 @@ get_product_string(void)
 	return (output);
 }
 
+static int
+open_md_ngz(int *outfd, char **errmsg)
+{
+	/*
+	 * We're in a non-global zone, so try and connect to the
+	 * metadata socket:
+	 */
+	int fd;
+	struct sockaddr_un ua;
+
+	if ((fd = socket(AF_UNIX, SOCK_STREAM, 0)) == -1) {
+		*errmsg = "Could not open metadata socket.";
+		return (-1);
+	}
+
+	bzero(&ua, sizeof (ua));
+	ua.sun_family = AF_UNIX;
+	strcpy(ua.sun_path, IN_ZONE_SOCKET);
+
+	if (connect(fd, (struct sockaddr *)&ua, sizeof (ua)) == -1) {
+		(void) close(fd);
+		*errmsg = "Could not connect metadata socket.";
+		return (-1);
+	}
+
+	*outfd = fd;
+
+	return (0);
+}
+
 int
 open_metadata_fd(int *outfd, char **errmsg)
 {
-	char *product = get_product_string();
+	char *product;
+	boolean_t smartdc_hvm_guest = B_FALSE;
 
-	if (getzoneid() != GLOBAL_ZONEID) {
-		/*
-		 * We're in a non-global zone, so try and connect to the
-		 * metadata socket:
-		 */
-		int fd;
-		struct sockaddr_un ua;
+	if (getzoneid() != GLOBAL_ZONEID)
+		return (open_md_ngz(outfd, errmsg));
 
-		if ((fd = socket(AF_UNIX, SOCK_STREAM, 0)) == -1) {
-			*errmsg = "Could not open metadata socket.";
-			return (-1);
-		}
+	/*
+	 * Interrogate the SMBIOS data from the system to see if we're
+	 * in a KVM/QEMU virtual machine:
+	 */
+	product = get_product_string();
+	if (product != NULL && strcmp(product, "SmartDC HVM") == 0)
+		smartdc_hvm_guest = B_TRUE;
+	free(product);
 
-		bzero(&ua, sizeof (ua));
-		ua.sun_family = AF_UNIX;
-		strcpy(ua.sun_path, IN_ZONE_SOCKET);
-
-		if (connect(fd, (struct sockaddr *)&ua, sizeof (ua)) == -1) {
-			(void) close(fd);
-			*errmsg = "Could not connect metadata socket.";
-			return (-1);
-		}
-
-		*outfd = fd;
-
-		return (0);
-	} else if (product != NULL && strcmp(product, "SmartDC HVM") == 0) {
+	if (smartdc_hvm_guest) {
 		/*
 		 * We're in a global zone in a SmartOS KVM/QEMU instance, so
 		 * try to use /dev/term/b for metadata.
 		 */
 		int fd;
 		
-		if ((fd = open("/dev/term/b", O_RDWR | O_EXCL |
+		if ((fd = open(IN_GLOBAL_DEVICE, O_RDWR | O_EXCL |
 		    O_NOCTTY)) == -1) {
 			*errmsg = "Could not open serial device.";
 			return (-1);
@@ -132,13 +150,11 @@ open_metadata_fd(int *outfd, char **errmsg)
 		*outfd = fd;
 
 		return (0);
-	} else {
-		/*
-		 * We have no idea.
-		 */
-		*errmsg = "I don't know how to get metadata on this system.";
-		return (-1);
 	}
 
+	/*
+	 * We have no idea.
+	 */
+	*errmsg = "I don't know how to get metadata on this system.";
 	return (-1);
 }
