@@ -10,13 +10,8 @@
 #include <string.h>
 #include <strings.h>
 
+#include "dynstr.h"
 #include "plat.h"
-
-typedef struct string {
-	size_t str_strlen;
-	size_t str_datalen;
-	char *str_data;
-} string_t;
 
 typedef enum mdata_exit_codes {
 	MDEC_SUCCESS = 0,
@@ -41,41 +36,13 @@ typedef enum mdata_get_state {
 typedef struct mdata_get {
 	FILE *mdg_fp;
 	char *mdg_keyname;
-	string_t mdg_data;
+	string_t *mdg_data;
 	mdata_get_state_t mdg_state;
 	mdata_get_response_t mdg_response;
 } mdata_get_t;
 
-#define	STRING_CHUNK_SIZE	64
-
 void
-reset_string(string_t *str)
-{
-	str->str_strlen = 0;
-	str->str_data[0] = '\0';
-}
-
-void
-append_string(string_t *str, char *news)
-{
-	int len = strlen(news);
-	int chunksz = STRING_CHUNK_SIZE;
-
-	while (chunksz < len)
-		chunksz *= 2;
-
-	if (len + str->str_strlen >= str->str_datalen) {
-		str->str_datalen += chunksz;
-		str->str_data = realloc(str->str_data, str->str_datalen);
-		if (str->str_data == NULL)
-			err(1, "could not allocate memory for string");
-	}
-	strcpy(str->str_data + str->str_strlen, news);
-	str->str_strlen += len;
-}
-
-void
-process_input(mdata_get_t *mdg, char *buf)
+process_input(mdata_get_t *mdg, const char *buf)
 {
 	switch (mdg->mdg_state) {
 	case MDGS_MESSAGE_HEADER:
@@ -86,7 +53,7 @@ process_input(mdata_get_t *mdg, char *buf)
 			mdg->mdg_response = MDGR_SUCCESS;
 			mdg->mdg_state = MDGS_MESSAGE_DATA;
 		} else {
-			append_string(&mdg->mdg_data, buf);
+			dynstr_append(mdg->mdg_data, buf);
 			mdg->mdg_response = MDGR_UNKNOWN;
 			mdg->mdg_state = MDGS_DONE;
 		}
@@ -96,9 +63,9 @@ process_input(mdata_get_t *mdg, char *buf)
 			mdg->mdg_state = MDGS_DONE;
 		} else {
 			int offs = buf[0] == '.' ? 1 : 0;
-			if (mdg->mdg_data.str_strlen > 0)
-				append_string(&mdg->mdg_data, "\n");
-			append_string(&mdg->mdg_data, buf + offs);
+			if (dynstr_len(mdg->mdg_data) > 0)
+				dynstr_append(mdg->mdg_data, "\n");
+			dynstr_append(mdg->mdg_data, buf + offs);
 		}
 		break;
 	case MDGS_DONE:
@@ -135,9 +102,7 @@ void
 read_response(mdata_get_t *mdg)
 {
 	int retries = 3;
-	string_t resp;
-
-	bzero(&resp, sizeof (resp));
+	string_t *resp = dynstr_new();
 
 	for (;;) {
 		char buf[2];
@@ -145,11 +110,11 @@ read_response(mdata_get_t *mdg)
 
 		if (sz == 1) {
 			if (buf[0] == '\n') {
-				process_input(mdg, resp.str_data);
-				reset_string(&resp);
+				process_input(mdg, dynstr_cstr(resp));
+				dynstr_reset(resp);
 			} else {
 				buf[1] = '\0';
-				append_string(&resp, buf);
+				dynstr_append(resp, buf);
 			}
 		} else if ((sz == 0) || (sz == -1 && errno == EAGAIN)) {
 			if (--retries == 0)
@@ -170,14 +135,14 @@ print_response(mdata_get_t *mdg)
 {
 	switch (mdg->mdg_response) {
 	case MDGR_SUCCESS:
-		fprintf(stdout, "%s\n", mdg->mdg_data.str_data);
+		fprintf(stdout, "%s\n", dynstr_cstr(mdg->mdg_data));
 		break;
 	case MDGR_NOTFOUND:
 		fprintf(stderr, "No metadata for '%s'\n", mdg->mdg_keyname);
 		break;
 	case MDGR_UNKNOWN:
 		fprintf(stderr, "Error getting metadata for key '%s': %s\n",
-		    mdg->mdg_keyname, mdg->mdg_data.str_data);
+		    mdg->mdg_keyname, dynstr_cstr(mdg->mdg_data));
 		break;
 	default:
 		abort();
@@ -196,6 +161,7 @@ main(int argc, char **argv)
 
 	bzero(&mdg, sizeof (mdg));
 	mdg.mdg_keyname = strdup(argv[1]);
+	mdg.mdg_data = dynstr_new();
 
 	if (open_metadata_stream(&mdg.mdg_fp, &errmsg) == -1) {
 		errx(MDEC_TRY_AGAIN, "%s", errmsg);

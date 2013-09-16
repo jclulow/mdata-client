@@ -4,7 +4,8 @@ CC = gcc
 UNAME_S := $(shell uname -s)
 PLATFORM_OK = false
 
-CFILES = main.c
+CFILES = main.c dynstr.c
+HDRS = dynstr.h plat.h
 CFLAGS = -Wall -Wextra
 LDLIBS =
 
@@ -22,8 +23,8 @@ endif
 .PHONY:	all
 all:	mdata-get
 
-mdata-get:	$(CFILES)
-	$(CC) $(CFLAGS) $(LDLIBS) -o $@ $^
+mdata-get:	$(CFILES) $(HDRS)
+	$(CC) $(CFLAGS) $(LDLIBS) -o $@ $(CFILES)
 
 .PHONY:	clean
 clean:
