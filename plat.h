@@ -5,7 +5,7 @@
 extern "C" {
 #endif
 
-int open_metadata_fd(int *fd, char **err);
+int open_metadata_stream(FILE **fp, char **err);
 
 #ifdef __cplusplus
 }

@@ -111,14 +111,45 @@ open_md_ngz(int *outfd, char **errmsg)
 	return (0);
 }
 
-int
-open_metadata_fd(int *outfd, char **errmsg)
+static int
+open_md_gz(int *outfd, char **errmsg)
 {
+	/*
+	 * We're in a global zone in a SmartOS KVM/QEMU instance, so
+	 * try to use /dev/term/b for metadata.
+	 */
+	int fd;
+
+	if ((fd = open(IN_GLOBAL_DEVICE, O_RDWR | O_EXCL |
+	    O_NOCTTY)) == -1) {
+		*errmsg = "Could not open serial device.";
+		return (-1);
+	}
+
+	if (raw_mode(fd, errmsg) == -1) {
+		(void) close(fd);
+		return (-1);
+	}
+
+	*outfd = fd;
+
+	return (0);
+}
+
+int
+open_metadata_stream(FILE **outfp, char **errmsg)
+{
+	int fd;
+	FILE *fp;
 	char *product;
 	boolean_t smartdc_hvm_guest = B_FALSE;
 
-	if (getzoneid() != GLOBAL_ZONEID)
-		return (open_md_ngz(outfd, errmsg));
+	if (getzoneid() != GLOBAL_ZONEID) {
+		if (open_md_ngz(&fd, errmsg) != 0) {
+			return (-1);
+		}
+		goto wrapfd;
+	}
 
 	/*
 	 * Interrogate the SMBIOS data from the system to see if we're
@@ -130,26 +161,10 @@ open_metadata_fd(int *outfd, char **errmsg)
 	free(product);
 
 	if (smartdc_hvm_guest) {
-		/*
-		 * We're in a global zone in a SmartOS KVM/QEMU instance, so
-		 * try to use /dev/term/b for metadata.
-		 */
-		int fd;
-		
-		if ((fd = open(IN_GLOBAL_DEVICE, O_RDWR | O_EXCL |
-		    O_NOCTTY)) == -1) {
-			*errmsg = "Could not open serial device.";
+		if (open_md_gz(&fd, errmsg) != 0) {
 			return (-1);
 		}
-
-		if (raw_mode(fd, errmsg) == -1) {
-			(void) close(fd);
-			return (-1);
-		}
-
-		*outfd = fd;
-
-		return (0);
+		goto wrapfd;
 	}
 
 	/*
@@ -157,4 +172,23 @@ open_metadata_fd(int *outfd, char **errmsg)
 	 */
 	*errmsg = "I don't know how to get metadata on this system.";
 	return (-1);
+
+wrapfd:
+	fp = fdopen(fd, "r+");
+	if (fp == NULL) {
+		(void) close(fd);
+		*errmsg = "Could not fdopen.";
+		return (-1);
+	}
+	/*
+	 * Disable buffering on the connection:
+	 */
+	if (setvbuf(fp, NULL, _IONBF, 0) != 0) {
+		*errmsg = "Could not setvbuf.";
+		(void) fclose(fp);
+		return (-1);
+	}
+
+	*outfp = fp;
+	return (0);
 }

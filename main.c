@@ -39,7 +39,7 @@ typedef enum mdata_get_state {
 } mdata_get_state_t;
 
 typedef struct mdata_get {
-	int mdg_fd;
+	FILE *mdg_fp;
 	char *mdg_keyname;
 	string_t mdg_data;
 	mdata_get_state_t mdg_state;
@@ -113,12 +113,13 @@ write_get(mdata_get_t *mdg)
 {
 	char *x;
 	int len;
+	int actual;
 
 	if ((len = asprintf(&x, "GET %s\n", mdg->mdg_keyname)) < 0) {
 		abort();
 	}
 
-	if (write(mdg->mdg_fd, x, len) != len) {
+	if ((actual = fwrite(x, 1, len, mdg->mdg_fp)) != len) {
 		err(12, "could not write thing");
 	}
 
@@ -140,7 +141,7 @@ read_response(mdata_get_t *mdg)
 
 	for (;;) {
 		char buf[2];
-		ssize_t sz = read(mdg->mdg_fd, &buf, 1);
+		ssize_t sz = fread(&buf, 1, 1, mdg->mdg_fp);
 
 		if (sz == 1) {
 			if (buf[0] == '\n') {
@@ -189,7 +190,6 @@ main(int argc, char **argv)
 	char *errmsg;
 	mdata_get_t mdg;
 
-
 	if (argc < 2) {
 		errx(MDEC_USAGE_ERROR, "Usage: %s <keyname>", argv[0]);
 	}
@@ -197,7 +197,7 @@ main(int argc, char **argv)
 	bzero(&mdg, sizeof (mdg));
 	mdg.mdg_keyname = strdup(argv[1]);
 
-	if (open_metadata_fd(&mdg.mdg_fd, &errmsg) == -1) {
+	if (open_metadata_stream(&mdg.mdg_fp, &errmsg) == -1) {
 		errx(MDEC_TRY_AGAIN, "%s", errmsg);
 	}
 
@@ -205,7 +205,8 @@ main(int argc, char **argv)
 	read_response(&mdg);
 	print_response(&mdg);
 
-	(void) close(mdg.mdg_fd);
+	(void) fclose(mdg.mdg_fp);
+	mdg.mdg_fp = NULL;
 	free(mdg.mdg_keyname);
 
 	if (mdg.mdg_state == MDGS_DONE) {
